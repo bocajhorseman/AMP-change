@@ -743,3 +743,127 @@ jobs:
 # .github/CODEOWNERS
 .github/workflows/*    @org/platform-team
 .github/*release*      @org/platform-team
+# .github/workflows/immutable-guard.yml
+name: Immutable guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [ main, master, develop ]
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  deployments: read
+  packages: read
+  pull-requests: read
+
+jobs:
+  deny-mutations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no token write)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Block write permissions in workflows
+        run: |
+          set -euo pipefail
+          files=$(git ls-files ".github/workflows/*.yml" || true)
+          [ -z "$files" ] && exit 0
+          if grep -Eiq "contents:\s*write|pull-requests:\s*write|packages:\s*write|deployments:\s*write" $files; then
+            echo "Write permissions detected in workflows. Not allowed."
+            exit 1
+          fi
+
+      - name: Block write-like actions and commands
+        run: |
+          set -euo pipefail
+          files=$(git ls-files ".github/workflows/*.yml" || true)
+          patterns='git\s+commit|git\s+push|git\s+tag|gh\s+pr|gh\s+release|create-pull-request@|release-action@|action-gh-release@'
+          [ -z "$files" ] || grep -Eiq "$patterns" $files && { echo "Self-write/publish automation detected."; exit 1; } || true
+
+      - name: Harden git remote and credentials
+        run: |
+          set -euo pipefail
+          git config --global --unset credential.helper || true
+          git remote set-url origin https://github.com/${{ github.repository }}.git
+          origin_url=$(git remote get-url origin)
+          echo "$origin_url" | grep -Eiq '@|token' && { echo "Credentialed remote detected."; exit 1; } || true
+
+      - name: Detect working tree mutations during CI
+        run: |
+          set -euo pipefail
+          status=$(git status --porcelain)
+          if [ -n "$status" ]; then
+            echo "Working tree modified during CI (mutation attempt)."
+            echo "$status"
+            exit 1
+          fi
+
+  freeze-mode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce freeze (deny all merges unless emergency label present)
+        run: |
+          set -euo pipefail
+          # Fail PRs unless explicitly labeled "unfreeze-approved"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            labels=$(printf "%s\n" "${{ join(github.event.pull_request.labels.*.name, ',') }}")
+            echo "$labels" | grep -Eiq "(^|,)unfreeze-approved(,|$)" && exit 0
+            echo "Repo is in freeze mode. Add 'unfreeze-approved' label after owner review to proceed."
+            exit 1
+          fi
+# .github/CODEOWNERS
+# Lock down workflows, manifests, and security-critical files
+.github/workflows/*   @org/platform-team
+requirements.txt      @org/platform-team
+pyproject.toml        @org/platform-team
+Pipfile               @org/platform-team
+setup.py              @org/platform-team
+
+# Block editor/IDE configs
+.vscode/*             @org/platform-team
+.idea/*               @org/platform-team
+.editorconfig         @org/platform-team
+*.code-workspace      @org/platform-team
+*.sublime-project     @org/platform-team
+*.sublime-workspace   @org/platform-team
+# .github/workflows/block-editor-and-risky.yml
+name: Block editor configs and risky changes
+on: [pull_request]
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  block-editor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Detect editor/IDE configs
+        run: |
+          set -e
+          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+          patterns='^(\.vscode/|\.idea/|\.editorconfig$|.*\.code-workspace$|.*\.sublime-(project|workspace)$|\.vimrc$|\.emacs$|\.emacs\.d/)'
+          echo "$changed" | grep -Eiq "$patterns" && { echo "Editor/IDE files are not allowed."; exit 1; } || true
+
+  block-risky:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Deny dependency and publish changes
+        run: |
+          set -e
+          # Fail if publishing workflows or dependency manifests change
+          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+          echo "$changed" | grep -Eiq '^\.github/workflows/.*(release|publish).*\.yml$' && { echo "Publish workflow changes blocked."; exit 1; } || true
+          echo "$changed" | grep -Eiq '^(requirements\.txt|pyproject\.toml|Pipfile|setup\.(py|cfg))$' && { echo "Dependency manifest changes blocked."; exit 1; } || true
