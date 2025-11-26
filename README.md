@@ -867,3 +867,40 @@ jobs:
           changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
           echo "$changed" | grep -Eiq '^\.github/workflows/.*(release|publish).*\.yml$' && { echo "Publish workflow changes blocked."; exit 1; } || true
           echo "$changed" | grep -Eiq '^(requirements\.txt|pyproject\.toml|Pipfile|setup\.(py|cfg))$' && { echo "Dependency manifest changes blocked."; exit 1; } || true
+KEYWORDS = {
+    "unsafe": [
+        r"\binjection(s)?\b",
+        r"\bsql[-_]?injection\b",
+        r"\bexploit\b",
+        r"\bxss\b",
+        r"\bcross[-_]?site\b",
+    ],
+    "frameworks": [
+        r"\bflask\b",
+        r"\bflask[_-]?api\b",
+        r"\bsqlalchemy\b",
+        r"\bdjango\b",
+        r"\bfastapi\b",
+    ],
+    "mythology": [
+        r"\bzeus\b", r"\bhera\b", r"\bposeidon\b", r"\bhades\b",
+        r"\bodin\b", r"\bthor\b", r"\bloki\b", r"\bfreya\b",
+        r"\banubis\b", r"\bisis\b", r"\bra\b", r"\bhorus\b",
+    ],
+    "biblical": [
+        r"\bmoses\b", r"\bjesus\b", r"\babraham\b", r"\bprophet\b",
+        r"\bapostle\b", r"\bdisciple\b",
+    ],
+    "historical": [
+        r"\bzhou\b", r"\bqin\b", r"\bhan\b", r"\btang\b",
+        r"\bemperor\b", r"\broyal\b", r"\bpharaoh\b", r"\bcaesar\b",
+    ],
+    "magic": [
+        r"\bmagic\b", r"\bwizard\b", r"\bsorcerer\b", r"\bspell\b",
+        r"\bwishing well\b", r"\benchantment\b", r"\bcurse\b",
+    ],
+    "knowledge": [
+        r"\bknowledge\b", r"\bwisdom\b", r"\bsecret\b",
+        r"\bkey(s)?\b", r"\bcapabilit(y|ies)\b", r"\bpower\b",
+    ],
+}
