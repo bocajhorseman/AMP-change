@@ -131,4 +131,108 @@ def main():
 
 if __name__ == "__main__":
     main()
+# .github/workflows/hardened.yml
+name: Hardened CI
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
 
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  # No write to packages, deployments, or environments by default
+
+# Only run on GitHub-hosted runners
+# Optionally lock to self-hosted with strict network rules
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    env:
+      # Never expose secrets to PRs from forks
+      CI: true
+    steps:
+      - name: Checkout (no token write)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Block network calls
+        run: |
+          echo "127.0.0.1 api.openai.com" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 pypi.org" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 files.pythonhosted.org" | sudo tee -a /etc/hosts
+
+      - name: Dependency keywords gate
+        run: |
+          set -e
+          patterns='flask|flask-api|sqlalchemy'
+          files=$(git ls-files | grep -E 'requirements\.txt|pyproject\.toml|Pipfile|setup\.(py|cfg)')
+          if [ -n "$files" ]; then
+            if grep -Eiq "$patterns" $files; then
+              echo "Found gated dependencies. Manual review required."
+              exit 1
+            fi
+          fi
+
+      - name: Keyword scan gate
+        run: |
+          set -e
+          grep -Eriq '\b(flask|flask[_-]?api|sqlalchemy)\b' . && { echo "Framework keywords detected"; exit 1; } || true
+
+  # Any job that needs secrets must go through an environment with approvals
+  approved-deploy:
+    needs: static-checks
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://example.invalid
+    steps:
+      - name: Stop unless environment approved
+        run: echo "This job only runs after environment approval."
+# .github/workflows/require-approval.yml
+name: Require approval for workflows that use secrets
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  approval_gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if run is from a fork
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork detected: secrets and deployments are blocked."
+            exit 1
+          fi
+      - name: Manual approval required
+        run: |
+          echo "Request approval via environment protections or a CODEOWNERS review."
+          exit 1
+# .github/CODEOWNERS
+# All workflows require platform team review
+.github/workflows/*   @org/platform-team
+
+# Dependency manifests require backend team review
+requirements.txt      @org/backend-team
+pyproject.toml        @org/backend-team
+Pipfile               @org/backend-team
+setup.py              @org/backend-team
+
+# Any Flask/SQLAlchemy-related code path requires security review
+**/*flask*            @org/security-team
+**/*sqlalchemy*       @org/security-team
+# .pre-commit-config.yaml snippet
+repos:
+  - repo: local
+    hooks:
+      - id: block-executables
+        name: Block executable files
+        entry: bash -c 'git ls-files -s | awk "{print \$1}" | grep -qE "^100755$" && { echo \"Executable files detected\"; exit 1; } || exit 0'
+        language: system
