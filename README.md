@@ -236,3 +236,73 @@ repos:
         name: Block executable files
         entry: bash -c 'git ls-files -s | awk "{print \$1}" | grep -qE "^100755$" && { echo \"Executable files detected\"; exit 1; } || exit 0'
         language: system
+# IDEs/editors
+.vscode/
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+.vim/
+.vimrc
+.emacs.d/
+.emacs
+.spacemacs
+*.code-workspace
+
+# EditorConfig (optional, if you don't want repo-level editor rules)
+.editorconfig
+
+# Language servers and tooling caches
+.pyright/
+.mypy_cache/
+.pytype/
+.cache/
+# .github/workflows/block-editor-configs.yml
+name: Block editor configs
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check-editor-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no write)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Detect editor configs
+        run: |
+          set -euo pipefail
+          blocked_patterns=(
+            '^\.vscode/'
+            '^\.idea/'
+            '\.sublime-(project|workspace)$'
+            '^\.editorconfig$'
+            '^\.vimrc$'
+            '^\.emacs$'
+            '^\.emacs\.d/'
+            '\.code-workspace$'
+          )
+          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+          violations=0
+          for pat in "${blocked_patterns[@]}"; do
+            echo "$changed" | grep -E "$pat" && violations=1 || true
+          done
+          if [ "$violations" -eq 1 ]; then
+            echo "Editor-specific configuration files detected. Please remove them to keep editors unaffected."
+            exit 1
+          fi
+          echo "No editor config files detected."
+# .github/CODEOWNERS
+# Any editor/IDE config must be reviewed (and generally rejected)
+.vscode/*     @org/platform-team
+.idea/*       @org/platform-team
+.editorconfig @org/platform-team
+*.code-workspace @org/platform-team
+*.sublime-project @org/platform-team
+*.sublime-workspace @org/platform-team
